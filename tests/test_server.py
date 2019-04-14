@@ -18,10 +18,9 @@ Pet API Service Test Suite
 Test cases can be run with the following:
 nosetests -v --with-spec --spec-color
 """
-import os
 import unittest
 import json
-from time import sleep # use for rate limiting Cloudant Lite :(
+from werkzeug.datastructures import MultiDict, ImmutableMultiDict
 from service import app
 from service.models import Pet
 
@@ -44,28 +43,10 @@ class TestPetServer(unittest.TestCase):
         """ Initialize the Cloudant database """
         self.app = app.test_client()
         Pet.init_db("tests")
-        # Cloudant Lite will rate limit so you must sleep between requests :()
-        TestPetServer.throttle_api()
         Pet.remove_all()
-        TestPetServer.throttle_api()
         Pet("fido", "dog", True).save()
-        TestPetServer.throttle_api()
         Pet("kitty", "cat", True).save()
-        TestPetServer.throttle_api()
         Pet("harry", "hippo", False).save()
-        TestPetServer.throttle_api()
-
-    def tearDown(self):
-        # The free version of Cloudant will rate limit calls
-        # to 20 lookups/sec, 10 writes/sec, and 5 queries/sec
-        # so we need to pause for a bit to avoid this problem
-        TestPetServer.throttle_api()
-
-    @staticmethod
-    def throttle_api(amount=0.25): # 1/4 second should be enough
-        """ Throttles the API calls by sleeping """
-        if 'VCAP_SERVICES' in os.environ:
-            sleep(amount)
 
     def test_index(self):
         """ Test the index page """
@@ -102,9 +83,9 @@ class TestPetServer(unittest.TestCase):
         new_pet = {'name': 'sammy', 'category': 'snake', 'available': True}
         data = json.dumps(new_pet)
         resp = self.app.post('/pets', data=data, content_type='application/json')
-        if resp.status_code == 429: # rate limit exceeded
-            sleep(1)                # wait for 1 second and try again
-            resp = self.app.post('/pets', data=data, content_type='application/json')
+        # if resp.status_code == 429: # rate limit exceeded
+        #     sleep(1)                # wait for 1 second and try again
+        #     resp = self.app.post('/pets', data=data, content_type='application/json')
         self.assertEqual(resp.status_code, HTTP_201_CREATED)
         # Make sure location header is set
         location = resp.headers.get('Location', None)
@@ -114,11 +95,25 @@ class TestPetServer(unittest.TestCase):
         self.assertEqual(new_json['name'], 'sammy')
         # check that count has gone up and includes sammy
         resp = self.app.get('/pets')
-        # print 'resp_data(2): ' + resp.data
         data = json.loads(resp.data)
         self.assertEqual(resp.status_code, HTTP_200_OK)
         self.assertEqual(len(data), pet_count + 1)
         self.assertIn(new_json, data)
+
+    def test_create_pet_from_formdata(self):
+        pet_data = MultiDict()
+        pet_data.add('name', 'Timothy')
+        pet_data.add('category', 'mouse')
+        pet_data.add('available', 'True')
+        data = ImmutableMultiDict(pet_data)
+        resp = self.app.post('/pets', data=data, content_type='application/x-www-form-urlencoded')
+        self.assertEqual(resp.status_code, HTTP_201_CREATED)
+        # Make sure location header is set
+        location = resp.headers.get('Location', None)
+        self.assertNotEqual(location, None)
+        # Check the data is correct
+        new_json = json.loads(resp.data)
+        self.assertEqual(new_json['name'], 'Timothy')
 
     def test_update_pet(self):
         """ Update a Pet """
@@ -178,6 +173,12 @@ class TestPetServer(unittest.TestCase):
         resp = self.app.post('/pets', data=data)
         self.assertEqual(resp.status_code, HTTP_400_BAD_REQUEST)
 
+    def test_create_pet_wrong_content_type(self):
+        """ Create a Pet with wrong Content-Type """
+        data = "jimmy the fish"
+        resp = self.app.post('/pets', data=data, content_type='plain/text')
+        self.assertEqual(resp.status_code, HTTP_400_BAD_REQUEST)
+
     def test_call_create_with_an_id(self):
         """ Call create passing an id """
         new_pet = {'name': 'sammy', 'category': 'snake', 'available': True}
@@ -185,7 +186,18 @@ class TestPetServer(unittest.TestCase):
         resp = self.app.post('/pets/1', data=data)
         self.assertEqual(resp.status_code, HTTP_405_METHOD_NOT_ALLOWED)
 
-    def test_query_pet_list(self):
+    def test_query_by_name(self):
+        """ Query Pets by name """
+        resp = self.app.get('/pets', query_string='name=fido')
+        self.assertEqual(resp.status_code, HTTP_200_OK)
+        self.assertTrue(len(resp.data) > 0)
+        self.assertIn('fido', resp.data)
+        self.assertNotIn('kitty', resp.data)
+        data = json.loads(resp.data)
+        query_item = data[0]
+        self.assertEqual(query_item['name'], 'fido')
+
+    def test_query_by_category(self):
         """ Query Pets by category """
         resp = self.app.get('/pets', query_string='category=dog')
         self.assertEqual(resp.status_code, HTTP_200_OK)
@@ -195,6 +207,17 @@ class TestPetServer(unittest.TestCase):
         data = json.loads(resp.data)
         query_item = data[0]
         self.assertEqual(query_item['category'], 'dog')
+
+    def test_query_by_available(self):
+        """ Query Pets by availability """
+        resp = self.app.get('/pets', query_string='available=true')
+        self.assertEqual(resp.status_code, HTTP_200_OK)
+        self.assertTrue(len(resp.data) > 0)
+        # self.assertIn('fido', resp.data)
+        # self.assertNotIn('harry', resp.data)
+        data = json.loads(resp.data)
+        query_item = data[0]
+        self.assertEqual(query_item['available'], True)
 
     def test_purchase_a_pet(self):
         """ Purchase a Pet """
