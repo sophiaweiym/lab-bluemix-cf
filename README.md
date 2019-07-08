@@ -1,6 +1,6 @@
 # Bluemix Python Web application
 
-[![Build Status](https://travis-ci.org/rofrano/lab-bluemix-cf.svg?branch=master)](https://travis-ci.org/rofrano/lab-bluemix-cf)
+[![Build Status](https://travis-ci.org/sophiaweiym/lab-bluemix-cf.svg?branch=master)](https://travis-ci.org/sophiaweiym/lab-bluemix-cf)
 ![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=rofrano_lab-bluemix-cf&metric=alert_status)
 ![Coverage](https://sonarcloud.io/api/project_badges/measure?project=rofrano_lab-bluemix-cf&metric=coverage)
 
